@@ -24,7 +24,8 @@ const startInterview = async (req, res, next) => {
       // Customization options
       enabledRounds, // Array of round types to include: ['technical', 'hr', ...]
       questionCounts, // Object: { technical: 3, hr: 2, ... }
-      difficulty // Override difficulty for technical round
+      difficulty, // Override difficulty for technical round
+      proctored
     } = req.body;
     const studentId = req.user._id;
 
@@ -259,7 +260,8 @@ const startInterview = async (req, res, next) => {
       resumeId: resumeData?._id,
       rounds,
       status: 'active',
-      currentRoundIndex: 0
+      currentRoundIndex: 0,
+      proctored: !!proctored
     });
 
     await session.save();
@@ -283,7 +285,8 @@ const startInterview = async (req, res, next) => {
           name: roleProfile.roleName
         },
         roundsMetadata,
-        status: session.status
+        status: session.status,
+        proctored: session.proctored
       }
     });
   } catch (error) {
@@ -353,7 +356,8 @@ const getNextQuestion = async (req, res, next) => {
         success: true,
         message: 'All questions have been answered',
         data: {
-          allQuestionsAnswered: true
+          allQuestionsAnswered: true,
+          proctored: session.proctored
         }
       });
     }
@@ -368,7 +372,8 @@ const getNextQuestion = async (req, res, next) => {
         totalQuestions,
         difficulty: nextQuestion.difficulty,
         timeMinutes: nextQuestion.timeMinutes,
-        sessionStartTime: session.createdAt
+        sessionStartTime: session.createdAt,
+        proctored: session.proctored
       }
     });
   } catch (error) {
@@ -837,6 +842,7 @@ const getUserSessions = async (req, res, next) => {
         company: session.roleProfileId?.companyName || '',
         mode: session.mode,
         status: session.status,
+        proctored: session.proctored,
         startedAt: session.createdAt,
         updatedAt: session.updatedAt,
         totalQuestions,

@@ -20,6 +20,7 @@ export default function StartInterviewPage() {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState('');
   const [showCustomization, setShowCustomization] = useState(false);
+  const [proctored, setProctored] = useState('proctored');
   
   // Customization state
   const [enabledRounds, setEnabledRounds] = useState({
@@ -205,7 +206,8 @@ export default function StartInterviewPage() {
         roleProfileId,
         enabledRounds: roundsToEnable,
         questionCounts,
-        difficulty
+        difficulty,
+        proctored: proctored === 'proctored'
       };
       if (mode === 'resume' || mode === 'mixed') {
         if (user?.resumeId) {
@@ -238,6 +240,45 @@ export default function StartInterviewPage() {
             <Loader />
           ) : (
             <form onSubmit={handleStart}>
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select Interview Mode
+                </label>
+                <div className="space-y-2">
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      name="proctor-mode"
+                      value="proctored"
+                      checked={proctored === 'proctored'}
+                      onChange={(e) => setProctored(e.target.value)}
+                      className="mr-2"
+                    />
+                    <span className="font-medium">Proctored (fullscreen enforced, no tab switching)</span>
+                  </label>
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      name="proctor-mode"
+                      value="non-proctored"
+                      checked={proctored === 'non-proctored'}
+                      onChange={(e) => setProctored(e.target.value)}
+                      className="mr-2"
+                    />
+                    <span className="font-medium">Non-proctored (standard experience)</span>
+                  </label>
+                </div>
+                {proctored === 'proctored' ? (
+                  <p className="mt-2 text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded px-3 py-2">
+                    You will be asked to stay in fullscreen and cannot switch tabs during the interview.
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs text-gray-500">
+                    You can switch tabs or exit fullscreen when proctoring is disabled.
+                  </p>
+                )}
+              </div>
+
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Interview Mode

@@ -125,6 +125,10 @@ const interviewSessionSchema = new mongoose.Schema({
     type: String,
     enum: ['pending', 'active', 'completed'],
     default: 'pending'
+  },
+  proctored: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true

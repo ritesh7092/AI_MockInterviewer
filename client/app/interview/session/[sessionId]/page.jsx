@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import Card from '@/components/Card';
@@ -32,10 +32,36 @@ export default function InterviewSessionPage() {
   const [timeSpent, setTimeSpent] = useState(0); // in seconds
   const [questionStartTime, setQuestionStartTime] = useState(null);
   const [sessionStartTime, setSessionStartTime] = useState(null);
+  const [proctoringReady, setProctoringReady] = useState(false);
+  const [proctorViolation, setProctorViolation] = useState('');
+  const [violationCount, setViolationCount] = useState(0);
+  const [proctoringError, setProctoringError] = useState('');
+  const [requiresProctoring, setRequiresProctoring] = useState(false);
+
+  const proctoringActiveRef = useRef(false);
+  const currentQuestionIdRef = useRef(null);
 
   useEffect(() => {
     fetchNextQuestion();
   }, [sessionId]);
+
+useEffect(() => {
+  if (!question || question.questionId === currentQuestionIdRef.current) return;
+  currentQuestionIdRef.current = question.questionId;
+  setQuestionStartTime(Date.now());
+  setTimeSpent(0);
+}, [question]);
+
+useEffect(() => {
+  if (!requiresProctoring) {
+    setProctoringReady(true);
+    setProctorViolation('');
+    proctoringActiveRef.current = false;
+    return;
+  }
+  setProctoringReady(false);
+  proctoringActiveRef.current = false;
+}, [requiresProctoring]);
 
   // Timer effect - update time spent every second
   useEffect(() => {
@@ -54,11 +80,17 @@ export default function InterviewSessionPage() {
     setEvaluation(null);
     setAnswer('');
     setTimeSpent(0);
-    setQuestionStartTime(Date.now());
+    setQuestionStartTime(null);
 
     try {
       const response = await interviewAPI.getNextQuestion(sessionId);
       if (response.success) {
+        const isProctored = !!response.data.proctored;
+        setRequiresProctoring(isProctored);
+        if (!isProctored) {
+          setProctoringReady(true);
+        }
+        
         if (response.data.allQuestionsAnswered) {
           setAllQuestionsAnswered(true);
         } else {
@@ -74,6 +106,84 @@ export default function InterviewSessionPage() {
       setLoading(false);
     }
   };
+
+  const registerViolation = (message) => {
+    if (!proctoringActiveRef.current) return;
+    setViolationCount((prev) => prev + 1);
+    setProctorViolation(message);
+    setProctoringReady(false);
+    proctoringActiveRef.current = false;
+  };
+
+  const beginProctoring = async () => {
+    try {
+      setProctoringError('');
+      if (document.fullscreenElement && document.exitFullscreen) {
+        await document.exitFullscreen();
+      }
+
+      const el = document.documentElement;
+      if (el.requestFullscreen) {
+        await el.requestFullscreen();
+      } else if (el.webkitRequestFullscreen) {
+        await el.webkitRequestFullscreen();
+      } else if (el.mozRequestFullScreen) {
+        await el.mozRequestFullScreen();
+      } else if (el.msRequestFullscreen) {
+        await el.msRequestFullscreen();
+      } else {
+        throw new Error('Fullscreen not supported in this browser');
+      }
+
+      setProctorViolation('');
+      setProctoringReady(true);
+      proctoringActiveRef.current = true;
+    } catch (err) {
+      console.error('Fullscreen error', err);
+      setProctoringError(
+        err?.message || 'Unable to enter fullscreen. Please allow fullscreen permissions.'
+      );
+    }
+  };
+
+  useEffect(() => {
+    if (!requiresProctoring || !proctoringReady) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        registerViolation('Tab switch detected. Please stay on the interview screen.');
+      }
+    };
+
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        registerViolation('Fullscreen mode was exited.');
+      }
+    };
+
+    const handleBlur = () => {
+      registerViolation('Window focus lost.');
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [requiresProctoring, proctoringReady]);
+
+  useEffect(() => {
+    return () => {
+      proctoringActiveRef.current = false;
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    };
+  }, []);
 
   const handleSubmitAnswer = async (e) => {
     e.preventDefault();
@@ -158,8 +268,62 @@ export default function InterviewSessionPage() {
 
   return (
     <ProtectedRoute>
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <h1 className="text-3xl font-bold mb-6">Interview Session</h1>
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative">
+        {requiresProctoring && !proctoringReady && (
+          <div className="fixed inset-0 z-40 bg-black/70 flex items-center justify-center px-4">
+            <Card className="max-w-lg w-full text-center space-y-4">
+              <div>
+                <p className="text-sm uppercase tracking-wide text-primary-600 font-semibold">
+                  Proctored Mode Required
+                </p>
+                <h2 className="text-2xl font-bold">Enable Secure Interview Mode</h2>
+                <p className="text-gray-600 mt-2">
+                  Enter fullscreen to continue. Switching tabs or exiting fullscreen will pause the interview and log a violation.
+                </p>
+              </div>
+
+              {proctorViolation && (
+                <div className="p-3 rounded border border-yellow-200 bg-yellow-50 text-sm text-yellow-800">
+                  {proctorViolation} Click below to re-enter proctored mode.
+                </div>
+              )}
+
+              {proctoringError && (
+                <div className="p-3 rounded border border-red-200 bg-red-50 text-sm text-red-700">
+                  {proctoringError}
+                </div>
+              )}
+
+              <Button className="w-full" onClick={beginProctoring}>
+                Enter Fullscreen
+              </Button>
+              <Button
+                variant="secondary"
+                className="w-full"
+                onClick={() => router.push('/dashboard')}
+              >
+                Exit Interview
+              </Button>
+              <p className="text-xs text-gray-500">
+                Pressing ESC or changing tabs will pause your interview until you return to fullscreen.
+              </p>
+            </Card>
+          </div>
+        )}
+
+        <h1 className="text-3xl font-bold mb-2">Interview Session</h1>
+        <div className="flex items-center justify-between text-sm text-gray-600 mb-6">
+          <span className={requiresProctoring ? (proctoringReady ? 'text-green-600 font-medium' : 'text-gray-500') : 'text-gray-500'}>
+            {requiresProctoring
+              ? proctoringReady
+                ? 'Proctored mode active (fullscreen enforced)'
+                : 'Awaiting proctored mode'
+              : 'Proctoring disabled for this session'}
+          </span>
+          <span className="text-gray-500">
+            Violations logged: <span className="font-semibold">{violationCount}</span>
+          </span>
+        </div>
 
         {loading ? (
           <Card>

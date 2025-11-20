@@ -125,13 +125,16 @@ export default function InterviewHistoryPage() {
               <Card key={session.sessionId} className="bg-gray-50 border border-gray-200">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                   <div>
-                    <div className="flex items-center gap-3 mb-1">
+                    <div className="flex items-center gap-3 flex-wrap mb-1">
                       <p className="text-lg font-semibold">
                         {session.roleName}
                         {session.company && <span className="text-gray-500 text-sm ml-2">· {session.company}</span>}
                       </p>
                       <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusClasses[session.status] || 'bg-gray-100 text-gray-700'}`}>
                         {session.status.charAt(0).toUpperCase() + session.status.slice(1)}
+                      </span>
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${session.proctored ? 'bg-purple-100 text-purple-800' : 'bg-gray-200 text-gray-700'}`}>
+                        {session.proctored ? 'Proctored' : 'Standard'}
                       </span>
                     </div>
                     <p className="text-sm text-gray-500">
