@@ -9,6 +9,56 @@ if (!GEMINI_API_KEY) {
   console.warn('⚠️  GEMINI_API_KEY not found in environment variables');
 }
 
+const ALLOWED_DIFFICULTIES = [
+  '2-month-summer-intern',
+  '6-month-intern',
+  'full-time-fresher',
+  'experience-1-year',
+  'experience-2-years',
+  'experience-3-years',
+  'experience-4-years',
+  'experience-5-plus-years'
+];
+
+const DIFFICULTY_MAP = {
+  beginner: '2-month-summer-intern',
+  intern: '2-month-summer-intern',
+  fresher: 'full-time-fresher',
+  entry: '6-month-intern',
+  'entry-level': '6-month-intern',
+  junior: 'full-time-fresher',
+  mid: 'experience-2-years',
+  middle: 'experience-2-years',
+  medium: 'experience-2-years',
+  intermediate: 'experience-2-years',
+  senior: 'experience-4-years',
+  expert: 'experience-5-plus-years',
+  advanced: 'experience-4-years',
+  lead: 'experience-4-years',
+  principal: 'experience-5-plus-years',
+  easy: '6-month-intern',
+  hard: 'experience-4-years'
+};
+
+const normalizeDifficultyValue = (value, fallback = 'full-time-fresher') => {
+  if (!value) return fallback;
+  const normalized = value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-');
+
+  if (ALLOWED_DIFFICULTIES.includes(normalized)) {
+    return normalized;
+  }
+
+  if (DIFFICULTY_MAP[normalized]) {
+    return DIFFICULTY_MAP[normalized];
+  }
+
+  return fallback;
+};
+
 /**
  * List available models (for debugging)
  */
@@ -194,6 +244,8 @@ const generateQuestions = async (roundType, context) => {
     difficulty = 'mid'
   } = context;
 
+  const normalizedDifficulty = normalizeDifficultyValue(difficulty);
+
   // Build context string
   let contextString = `Role: ${roleProfile.roleName}\n`;
   contextString += `Domain Tags: ${roleProfile.domainTags.join(', ')}\n`;
@@ -215,14 +267,16 @@ const generateQuestions = async (roundType, context) => {
     if (resumeData.parsed?.projects?.length > 0) {
       contextString += `- Projects: ${resumeData.parsed.projects.slice(0, 3).join('; ')}\n`;
     }
-    if (resumeData.parsed?.experienceYears) {
-      contextString += `- Experience: ${resumeData.parsed.experienceYears} years\n`;
+    const resumeExperienceYears =
+      resumeData.parsed?.experience?.totalYears ?? resumeData.parsed?.experienceYears;
+    if (resumeExperienceYears) {
+      contextString += `- Experience: ${resumeExperienceYears} years\n`;
     }
   }
 
   // Round-specific prompts
   const roundPrompts = {
-    technical: `Generate ${questionCount} technical interview questions for a candidate at ${difficulty.replace(/-/g, ' ')} level.
+    technical: `Generate ${questionCount} technical interview questions for a candidate at ${normalizedDifficulty.replace(/-/g, ' ')} level.
 Focus on:
 - Data structures and algorithms
 - Coding problems
@@ -284,7 +338,7 @@ IMPORTANT: You must respond with ONLY valid JSON in this exact format (no markdo
     {
       "id": "q1",
       "text": "Question text here",
-      "difficulty": "${difficulty}",
+      "difficulty": "${normalizedDifficulty}",
       "expectedKeywords": ["keyword1", "keyword2"],
       "timeMinutes": 5
     }
@@ -307,7 +361,7 @@ Generate exactly ${questionCount} questions. Make them diverse and relevant to t
     const questions = response.questions.map((q, index) => ({
       id: `${roundType}-q${index + 1}`, // Always use our format, ignore Gemini's ID
       text: q.text || '',
-      difficulty: q.difficulty || difficulty,
+      difficulty: normalizeDifficultyValue(q.difficulty || normalizedDifficulty, normalizedDifficulty),
       expectedKeywords: Array.isArray(q.expectedKeywords) ? q.expectedKeywords : [],
       timeMinutes: q.timeMinutes || 5
     }));
@@ -423,5 +477,6 @@ module.exports = {
   generateQuestions,
   evaluateAnswer,
   callGemini,
-  listModels
+  listModels,
+  normalizeDifficultyValue
 };

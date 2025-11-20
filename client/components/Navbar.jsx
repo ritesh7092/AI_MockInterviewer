@@ -32,6 +32,18 @@ export default function Navbar() {
                 >
                   Dashboard
                 </Link>
+                <Link
+                  href="/dashboard/resume"
+                  className="text-gray-700 hover:text-primary-600 px-3 py-2 rounded-md text-sm font-medium hidden sm:inline-block"
+                >
+                  Resume Insights
+                </Link>
+                <Link
+                  href="/dashboard/interviews"
+                  className="text-gray-700 hover:text-primary-600 px-3 py-2 rounded-md text-sm font-medium hidden sm:inline-block"
+                >
+                  Past Interviews
+                </Link>
                 <span className="text-gray-700 text-sm">
                   {user?.name}
                 </span>

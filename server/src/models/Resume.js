@@ -19,25 +19,53 @@ const resumeSchema = new mongoose.Schema({
     default: ''
   },
   parsed: {
-    skills: {
-      type: [String],
+    summary: { type: String, default: '' },
+    contact: {
+      email: { type: String, default: '' },
+      phone: { type: String, default: '' },
+      location: { type: String, default: '' }
+    },
+    skills: { type: [String], default: [] },
+    categorizedSkills: {
+      type: [
+        {
+          name: String,
+          matchedSkills: [String],
+          score: Number
+        }
+      ],
       default: []
     },
-    projects: {
-      type: [String],
+    education: { type: [String], default: [] },
+    projects: { type: [String], default: [] },
+    experience: {
+      entries: { type: [String], default: [] },
+      totalYears: { type: Number, default: 0 }
+    },
+    achievements: { type: [String], default: [] },
+    certifications: { type: [String], default: [] },
+    keywords: { type: [String], default: [] },
+    targetFields: {
+      type: [
+        {
+          field: String,
+          score: Number,
+          matchedSkills: [String]
+        }
+      ],
       default: []
     },
-    education: {
-      type: [String],
-      default: []
-    },
-    experienceYears: {
-      type: Number,
-      default: 0
-    },
-    keywords: {
-      type: [String],
-      default: []
+    atsScore: {
+      overall: { type: Number, default: 0 },
+      breakdown: {
+        sections: { type: Number, default: 0 },
+        skills: { type: Number, default: 0 },
+        keywords: { type: Number, default: 0 },
+        experience: { type: Number, default: 0 },
+        achievements: { type: Number, default: 0 }
+      },
+      strengths: { type: [String], default: [] },
+      improvements: { type: [String], default: [] }
     }
   },
   uploadedAt: {

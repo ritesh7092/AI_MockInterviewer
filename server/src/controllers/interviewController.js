@@ -1,9 +1,10 @@
 const { validationResult } = require('express-validator');
+const PDFDocument = require('pdfkit');
 const InterviewSession = require('../models/InterviewSession');
 const RoleProfile = require('../models/RoleProfile');
 const Resume = require('../models/Resume');
 const User = require('../models/User');
-const { generateQuestions, evaluateAnswer } = require('../services/geminiClient');
+const { generateQuestions, evaluateAnswer, normalizeDifficultyValue } = require('../services/geminiClient');
 
 const startInterview = async (req, res, next) => {
   try {
@@ -139,7 +140,9 @@ const startInterview = async (req, res, next) => {
     const allRoundTypes = ['technical', 'hr', 'manager', 'cto', 'case'];
     
     // Determine which structure to use: custom difficulty defaults or role profile defaults
-    const selectedDifficulty = difficulty || roleProfile.interviewStructures?.technical?.difficulty || 'full-time-fresher';
+    const selectedDifficulty = normalizeDifficultyValue(
+      difficulty || roleProfile.interviewStructures?.technical?.difficulty || 'full-time-fresher'
+    );
     const defaultStructure = defaultInterviewStructures[selectedDifficulty] || defaultInterviewStructures['full-time-fresher'];
     
     // Use enabledRounds if provided, otherwise use defaults based on difficulty
@@ -170,8 +173,14 @@ const startInterview = async (req, res, next) => {
       
       // Set difficulty for technical round
       if (roundType === 'technical') {
-        roundDifficulty = difficulty || roleProfile.interviewStructures?.technical?.difficulty || 'full-time-fresher';
+        roundDifficulty = normalizeDifficultyValue(
+          difficulty || roleProfile.interviewStructures?.technical?.difficulty || selectedDifficulty
+        );
+      } else if (roleProfile.interviewStructures[roundType]?.difficulty) {
+        roundDifficulty = normalizeDifficultyValue(roleProfile.interviewStructures[roundType].difficulty, selectedDifficulty);
       }
+      
+      roundDifficulty = normalizeDifficultyValue(roundDifficulty, selectedDifficulty);
       
       // Only add round if question count > 0
       if (questionCount > 0) {
@@ -200,14 +209,14 @@ const startInterview = async (req, res, next) => {
       const structure = roleProfile.interviewStructures[round.roundType];
 
       try {
+        const roundDifficulty = round.customDifficulty || structure?.difficulty || selectedDifficulty;
+
         const context = {
           roleProfile,
           resumeData,
           userProfile,
           questionCount: round.customQuestionCount || structure?.questionCount || 5,
-          difficulty: (round.roundType === 'technical' && round.customDifficulty) 
-            ? round.customDifficulty 
-            : (structure?.difficulty || 'full-time-fresher')
+          difficulty: normalizeDifficultyValue(roundDifficulty, selectedDifficulty)
         };
 
         const { questions } = await generateQuestions(round.roundType, context);
@@ -584,17 +593,19 @@ const completeInterview = async (req, res, next) => {
   }
 };
 
-// Helper function to calculate and return summary
-const calculateAndReturnSummary = async (session, res, forceComplete = false) => {
+const buildSessionSummary = (session) => {
   // Calculate overall performance (including partial completion)
   let totalScore = 0;
+  let scoreEntries = 0;
   let answeredCount = 0;
   let totalQuestions = 0;
   let totalTimeSpentSeconds = 0;
   let averageTimePerQuestion = 0;
   const roundWisePerformance = [];
 
-  for (const round of session.rounds) {
+  const rounds = session.rounds || [];
+
+  for (const round of rounds) {
     let roundScore = 0;
     let roundAnswered = 0;
     let roundTimeSpent = 0;
@@ -606,6 +617,7 @@ const calculateAndReturnSummary = async (session, res, forceComplete = false) =>
         totalScore += answer.evaluation.score;
         roundAnswered++;
         answeredCount++;
+        scoreEntries++;
       }
       if (answer.timeSpentSeconds) {
         roundTimeSpent += answer.timeSpentSeconds;
@@ -629,7 +641,7 @@ const calculateAndReturnSummary = async (session, res, forceComplete = false) =>
     });
   }
 
-  const overallScore = answeredCount > 0 ? totalScore / answeredCount : 0;
+  const overallScore = scoreEntries > 0 ? totalScore / scoreEntries : 0;
   const completionPercentage = totalQuestions > 0 
     ? Math.round((answeredCount / totalQuestions) * 100) 
     : 0;
@@ -637,14 +649,7 @@ const calculateAndReturnSummary = async (session, res, forceComplete = false) =>
   const totalInterviewTimeSeconds = Math.floor((new Date() - session.createdAt) / 1000);
 
   // Check if all questions are answered
-  const allAnswered = answeredCount === totalQuestions;
-
-  // Update session status if not already completed
-  const wasAlreadyCompleted = session.status === 'completed';
-  if (!wasAlreadyCompleted) {
-    session.status = 'completed';
-    await session.save();
-  }
+  const allAnswered = answeredCount === totalQuestions && totalQuestions > 0;
 
   // Calculate hiring threshold (typically 7/10 for most roles, 8/10 for senior)
   const hiringThreshold = 7.0;
@@ -656,7 +661,7 @@ const calculateAndReturnSummary = async (session, res, forceComplete = false) =>
   const allImprovementTips = [];
   const allFeedback = [];
   
-  for (const round of session.rounds) {
+  for (const round of rounds) {
     for (const answer of round.answers) {
       if (answer.evaluation) {
         if (answer.evaluation.strengths) {
@@ -685,7 +690,7 @@ const calculateAndReturnSummary = async (session, res, forceComplete = false) =>
   const uniqueImprovementTips = [...new Set(allImprovementTips)].slice(0, 10);
   
   // Calculate time statistics
-  const estimatedTimeSeconds = session.rounds.reduce((total, round) => {
+  const estimatedTimeSeconds = rounds.reduce((total, round) => {
     return total + round.questions.reduce((roundTotal, q) => {
       return roundTotal + (q.timeMinutes || 5) * 60;
     }, 0);
@@ -694,55 +699,298 @@ const calculateAndReturnSummary = async (session, res, forceComplete = false) =>
   const timeEfficiency = estimatedTimeSeconds > 0 
     ? Math.round((totalTimeSpentSeconds / estimatedTimeSeconds) * 100) 
     : 100;
-  
+
+  const summary = {
+    sessionId: session._id,
+    mode: session.mode,
+    roleProfile: session.roleProfileId ? {
+      id: session.roleProfileId._id,
+      name: session.roleProfileId.roleName,
+      company: session.roleProfileId.companyName || ''
+    } : null,
+    overallScore: Math.round(overallScore * 10) / 10,
+    totalQuestions,
+    questionsAnswered: answeredCount,
+    unansweredQuestions: totalQuestions - answeredCount,
+    completionPercentage,
+    isComplete: allAnswered,
+    
+    // Time statistics
+    totalTimeSpentSeconds: Math.round(totalTimeSpentSeconds),
+    averageTimePerQuestionSeconds: Math.round(averageTimePerQuestion),
+    totalInterviewTimeSeconds,
+    estimatedTimeSeconds,
+    timeEfficiency,
+    
+    // Hiring assessment
+    hiringThreshold,
+    isHireable,
+    scoreGap: Math.max(0, hiringThreshold - overallScore),
+    hiringRecommendation: isHireable 
+      ? 'You meet the hiring threshold! Continue improving to strengthen your profile.'
+      : `You need to improve your score by ${(hiringThreshold - overallScore).toFixed(1)} points to meet the hiring threshold.`,
+    
+    // Detailed report
+    overallStrengths: uniqueStrengths,
+    overallWeaknesses: uniqueWeaknesses,
+    overallImprovementTips: uniqueImprovementTips,
+    detailedFeedback: allFeedback,
+    
+    roundWisePerformance,
+    startedAt: session.createdAt,
+    completedAt: session.updatedAt || session.createdAt
+  };
+
+  return {
+    summary,
+    meta: {
+      allAnswered,
+      totalQuestions,
+      answeredCount
+    }
+  };
+};
+
+// Helper function to calculate and return summary
+const calculateAndReturnSummary = async (session, res, forceComplete = false) => {
+  const { summary, meta } = buildSessionSummary(session);
+
+  // Update session status if not already completed
+  const wasAlreadyCompleted = session.status === 'completed';
+  if (!wasAlreadyCompleted) {
+    session.status = 'completed';
+    await session.save();
+  }
+
   res.json({
     success: true,
     message: wasAlreadyCompleted 
       ? 'Interview summary retrieved' 
-      : (allAnswered 
+      : (meta.allAnswered 
         ? 'Interview completed successfully' 
         : 'Interview completed with partial answers'),
-    data: {
-      sessionId: session._id,
-      overallScore: Math.round(overallScore * 10) / 10,
-      totalQuestions,
-      questionsAnswered: answeredCount,
-      unansweredQuestions: totalQuestions - answeredCount,
-      completionPercentage,
-      isComplete: allAnswered,
-      
-      // Time statistics
-      totalTimeSpentSeconds: Math.round(totalTimeSpentSeconds),
-      averageTimePerQuestionSeconds: Math.round(averageTimePerQuestion),
-      totalInterviewTimeSeconds,
-      estimatedTimeSeconds,
-      timeEfficiency,
-      
-      // Hiring assessment
-      hiringThreshold,
-      isHireable,
-      scoreGap: Math.max(0, hiringThreshold - overallScore),
-      hiringRecommendation: isHireable 
-        ? 'You meet the hiring threshold! Continue improving to strengthen your profile.'
-        : `You need to improve your score by ${(hiringThreshold - overallScore).toFixed(1)} points to meet the hiring threshold.`,
-      
-      // Detailed report
-      overallStrengths: uniqueStrengths,
-      overallWeaknesses: uniqueWeaknesses,
-      overallImprovementTips: uniqueImprovementTips,
-      detailedFeedback: allFeedback,
-      
-      roundWisePerformance,
-      startedAt: session.createdAt,
-      completedAt: session.updatedAt || session.createdAt
-    }
+    data: summary
   });
+};
+
+const getUserSessions = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+
+    const sessions = await InterviewSession.find({ studentId: userId })
+      .populate('roleProfileId', 'roleName companyName')
+      .sort({ createdAt: -1 })
+      .limit(limit);
+
+    const formattedSessions = sessions.map((session) => {
+      const rounds = session.rounds || [];
+
+      const totalQuestions = rounds.reduce(
+        (sum, round) => sum + round.questions.length,
+        0
+      );
+      const answeredQuestions = rounds.reduce(
+        (sum, round) => sum + round.answers.length,
+        0
+      );
+
+      let totalScore = 0;
+      let scoreEntries = 0;
+      let latestFeedback = null;
+      let latestFeedbackDate = null;
+
+      rounds.forEach((round) => {
+        round.answers.forEach((answer) => {
+          if (answer.evaluation && typeof answer.evaluation.score === 'number') {
+            totalScore += answer.evaluation.score;
+            scoreEntries++;
+          }
+
+          const submittedAt = answer.submittedAt ? new Date(answer.submittedAt) : null;
+          if (
+            answer.evaluation?.feedbackText &&
+            (!latestFeedbackDate || (submittedAt && submittedAt > latestFeedbackDate))
+          ) {
+            latestFeedback = answer.evaluation.feedbackText;
+            latestFeedbackDate = submittedAt;
+          }
+        });
+      });
+
+      const averageScore =
+        scoreEntries > 0 ? Math.round((totalScore / scoreEntries) * 10) / 10 : null;
+
+      const roundSnapshots = rounds.map((round) => ({
+        roundType: round.roundType,
+        totalQuestions: round.questions.length,
+        answeredQuestions: round.answers.length,
+        completionPercentage:
+          round.questions.length > 0
+            ? Math.round((round.answers.length / round.questions.length) * 100)
+            : 0,
+      }));
+
+      return {
+        sessionId: session._id,
+        roleName: session.roleProfileId?.roleName || 'Custom Interview',
+        company: session.roleProfileId?.companyName || '',
+        mode: session.mode,
+        status: session.status,
+        startedAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        totalQuestions,
+        answeredQuestions,
+        completionPercentage:
+          totalQuestions > 0
+            ? Math.round((answeredQuestions / totalQuestions) * 100)
+            : 0,
+        averageScore,
+        latestFeedback,
+        rounds: roundSnapshots,
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        sessions: formattedSessions,
+        count: formattedSessions.length,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const downloadSessionReport = async (req, res, next) => {
+  try {
+    const { sessionId } = req.params;
+    const userId = req.user._id;
+
+    const session = await InterviewSession.findById(sessionId).populate('roleProfileId');
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: 'Interview session not found',
+      });
+    }
+
+    if (session.studentId.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have access to this session',
+      });
+    }
+
+    const { summary } = buildSessionSummary(session);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename=mock-interview-${sessionId}.pdf`
+    );
+
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    doc.pipe(res);
+
+    doc.fontSize(20).text('Mock Interview Report', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Session ID: ${sessionId}`);
+    doc.text(
+      `Role: ${summary.roleProfile?.name || session.roleProfileId?.roleName || 'N/A'}`
+    );
+    doc.text(`Mode: ${summary.mode}`);
+    doc.text(`Status: ${session.status}`);
+    doc.text(`Started: ${new Date(summary.startedAt).toLocaleString()}`);
+    doc.text(`Completed: ${new Date(summary.completedAt).toLocaleString()}`);
+    doc.moveDown();
+
+    doc
+      .fontSize(16)
+      .text('Performance Overview', { underline: true, continued: false });
+    doc.moveDown(0.5);
+
+    doc.fontSize(12).text(`Overall Score: ${summary.overallScore}/10`);
+    doc.text(
+      `Completion: ${summary.questionsAnswered}/${summary.totalQuestions} (${summary.completionPercentage}%)`
+    );
+    doc.text(
+      `Hiring Recommendation: ${
+        summary.isHireable ? 'Hire-ready' : 'Needs improvement'
+      }`
+    );
+    doc.text(
+      `Recommendation Detail: ${summary.hiringRecommendation.replace(/\n/g, ' ')}`
+    );
+    doc.moveDown();
+
+    doc.fontSize(14).text('Round-wise Performance', { underline: true });
+    doc.moveDown(0.5);
+    summary.roundWisePerformance.forEach((round) => {
+      doc
+        .fontSize(12)
+        .text(
+          `${round.roundType.toUpperCase()}: Score ${round.averageScore}/10 | Completion ${round.completionPercentage}%`
+        );
+      doc.text(
+        `Answered: ${round.questionsAnswered}/${round.totalQuestions} | Time: ${
+          round.totalTimeSpentSeconds || 0
+        }s`
+      );
+      doc.moveDown(0.3);
+    });
+    doc.moveDown();
+
+    if (summary.overallStrengths.length) {
+      doc.fontSize(14).text('Key Strengths', { underline: true });
+      summary.overallStrengths.forEach((strength, idx) => {
+        doc.fontSize(12).text(`${idx + 1}. ${strength}`);
+      });
+      doc.moveDown();
+    }
+
+    if (summary.overallWeaknesses.length) {
+      doc.fontSize(14).text('Areas to Improve', { underline: true });
+      summary.overallWeaknesses.forEach((weakness, idx) => {
+        doc.fontSize(12).text(`${idx + 1}. ${weakness}`);
+      });
+      doc.moveDown();
+    }
+
+    if (summary.overallImprovementTips.length) {
+      doc.fontSize(14).text('Actionable Tips', { underline: true });
+      summary.overallImprovementTips.forEach((tip, idx) => {
+        doc.fontSize(12).text(`${idx + 1}. ${tip}`);
+      });
+      doc.moveDown();
+    }
+
+    if (summary.detailedFeedback.length) {
+      doc.fontSize(14).text('Detailed Feedback', { underline: true });
+      summary.detailedFeedback.forEach((feedback, idx) => {
+        doc
+          .fontSize(12)
+          .text(
+            `${idx + 1}. ${feedback.roundType.toUpperCase()} - Score ${feedback.score}/10`
+          );
+        doc.fontSize(11).text(feedback.feedback);
+        doc.moveDown(0.5);
+      });
+    }
+
+    doc.end();
+  } catch (error) {
+    next(error);
+  }
 };
 
 module.exports = {
   startInterview,
   getNextQuestion,
   submitAnswer,
-  completeInterview
+  completeInterview,
+  getUserSessions,
+  downloadSessionReport
 };
 

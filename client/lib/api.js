@@ -72,6 +72,11 @@ export const resumeAPI = {
     });
     return response.data;
   },
+
+  getInsights: async () => {
+    const response = await api.get('/resume/insights');
+    return response.data;
+  },
 };
 
 // Roles API
@@ -86,13 +91,6 @@ export const rolesAPI = {
 export const interviewAPI = {
   start: async (data) => {
     const response = await api.post('/interview/start', data);
-    return response.data;
-  },
-  
-  complete: async (sessionId, forceComplete = false) => {
-    const response = await api.post(`/interview/${sessionId}/complete`, {
-      forceComplete
-    });
     return response.data;
   },
   
@@ -120,6 +118,22 @@ export const interviewAPI = {
   getSummary: async (sessionId) => {
     const response = await api.get(`/interview/${sessionId}/summary`);
     return response.data;
+  },
+
+  getSessions: async (limit) => {
+    const response = await api.get('/interview/sessions', {
+      params: {
+        limit
+      }
+    });
+    return response.data;
+  },
+
+  downloadReport: async (sessionId) => {
+    const response = await api.get(`/interview/${sessionId}/report`, {
+      responseType: 'blob'
+    });
+    return response;
   },
 };
 

@@ -45,10 +45,10 @@ export default function ResumeUploadPage() {
     try {
       const response = await resumeAPI.upload(file);
       if (response.success) {
-        setResult(response.data);
+        setResult(response.data?.parsed ? response.data : null);
         setTimeout(() => {
           router.push('/dashboard');
-        }, 2000);
+        }, 2500);
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Upload failed');
@@ -88,14 +88,37 @@ export default function ResumeUploadPage() {
               </div>
             )}
 
-            {result && (
-              <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded">
-                <h3 className="font-semibold text-green-800 mb-2">Resume Parsed Successfully!</h3>
-                <div className="text-sm text-green-700">
-                  <p><strong>Skills found:</strong> {result.parsed?.skills?.length || 0}</p>
-                  <p><strong>Projects found:</strong> {result.parsed?.projects?.length || 0}</p>
-                  <p><strong>Experience years:</strong> {result.parsed?.experienceYears || 0}</p>
-                  <p className="mt-2">Redirecting to dashboard...</p>
+            {result?.parsed && (
+              <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <h3 className="font-semibold text-green-800 text-lg">Resume Parsed Successfully!</h3>
+                    <p className="text-sm text-green-700">ATS insights generated. Redirecting to dashboard...</p>
+                  </div>
+                  <div className="bg-white rounded-lg shadow px-4 py-2 text-center">
+                    <p className="text-xs text-gray-500 uppercase">ATS Score</p>
+                    <p className="text-2xl font-bold text-green-600">{result.parsed.atsScore?.overall || 0}</p>
+                  </div>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-3 text-sm text-green-800">
+                  <div>
+                    <p className="font-semibold">Top Target Fields</p>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {result.parsed.targetFields?.length ? result.parsed.targetFields.map((field) => (
+                        <span key={field.field} className="px-2 py-1 bg-white text-green-700 rounded-full text-xs font-medium">
+                          {field.field} · {field.score}%
+                        </span>
+                      )) : <span className="text-green-700">—</span>}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="font-semibold">Strength Highlights</p>
+                    <ul className="list-disc list-inside mt-1 space-y-1">
+                      {(result.parsed.atsScore?.strengths || []).slice(0, 2).map((tip, idx) => (
+                        <li key={idx}>{tip}</li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               </div>
             )}

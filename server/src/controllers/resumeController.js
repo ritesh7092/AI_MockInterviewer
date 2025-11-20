@@ -86,13 +86,7 @@ const uploadResume = async (req, res, next) => {
       message: 'Resume uploaded and parsed successfully',
       data: {
         resumeId: resume._id,
-        parsed: {
-          skills: parsed.skills,
-          projects: parsed.projects.slice(0, 3), // Show first 3 projects
-          education: parsed.education,
-          experienceYears: parsed.experienceYears,
-          keywordsCount: parsed.keywords.length
-        }
+        parsed
       }
     });
   } catch (error) {
@@ -108,7 +102,34 @@ const uploadResume = async (req, res, next) => {
   }
 };
 
+const getResumeInsights = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const resume = await Resume.findOne({ userId }).sort({ createdAt: -1 });
+
+    if (!resume) {
+      return res.json({
+        success: true,
+        data: null,
+        message: 'No resume uploaded yet'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        resumeId: resume._id,
+        updatedAt: resume.updatedAt,
+        parsed: resume.parsed
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
-  uploadResume
+  uploadResume,
+  getResumeInsights
 };
 

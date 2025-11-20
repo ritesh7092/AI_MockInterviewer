@@ -6,7 +6,9 @@ const {
   startInterview,
   getNextQuestion,
   submitAnswer,
-  completeInterview
+  completeInterview,
+  getUserSessions,
+  downloadSessionReport
 } = require('../controllers/interviewController');
 
 const router = express.Router();
@@ -46,6 +48,13 @@ router.post(
 );
 
 router.get(
+  '/sessions',
+  authenticate,
+  sanitizeInput,
+  getUserSessions
+);
+
+router.get(
   '/:sessionId/next',
   authenticate,
   sanitizeInput,
@@ -78,6 +87,14 @@ router.get(
   sanitizeInput,
   param('sessionId').isMongoId().withMessage('Invalid session ID'),
   completeInterview
+);
+
+router.get(
+  '/:sessionId/report',
+  authenticate,
+  sanitizeInput,
+  param('sessionId').isMongoId().withMessage('Invalid session ID'),
+  downloadSessionReport
 );
 
 module.exports = router;

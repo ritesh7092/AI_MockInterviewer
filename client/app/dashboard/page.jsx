@@ -1,26 +1,28 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '@/contexts/AuthContext';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
-import Loader from '@/components/Loader';
 import Link from 'next/link';
-import { authAPI } from '@/lib/api';
+
+const resourceCards = [
+  {
+    title: 'Resume ATS Center',
+    description: 'Upload resumes, view ATS score, and see strengths & improvement ideas tailored to your profile.',
+    href: '/dashboard/resume',
+    action: 'Open Resume Insights'
+  },
+  {
+    title: 'Interview History',
+    description: 'Browse every mock interview you have taken, download reports, and plan your next practice session.',
+    href: '/dashboard/interviews',
+    action: 'View Past Interviews'
+  }
+];
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const router = useRouter();
-  const [sessions, setSessions] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // In a real app, you'd fetch sessions from an API endpoint
-    // For now, we'll just show user info
-    setLoading(false);
-  }, []);
 
   return (
     <ProtectedRoute>
@@ -57,23 +59,19 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        <Card>
-          <h2 className="text-xl font-semibold mb-4">Past Interview Sessions</h2>
-          {loading ? (
-            <Loader />
-          ) : sessions.length === 0 ? (
-            <p className="text-gray-600">No past sessions yet. Start your first interview!</p>
-          ) : (
-            <div className="space-y-2">
-              {sessions.map((session) => (
-                <div key={session._id} className="p-4 border rounded-lg">
-                  <p className="font-medium">Session {session._id}</p>
-                  <p className="text-sm text-gray-600">Status: {session.status}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
+        <div className="grid md:grid-cols-2 gap-6">
+          {resourceCards.map((card) => (
+            <Card key={card.title} className="flex flex-col justify-between">
+              <div>
+                <h3 className="text-xl font-semibold mb-2">{card.title}</h3>
+                <p className="text-gray-600 mb-4">{card.description}</p>
+              </div>
+              <Link href={card.href} className="block mt-auto">
+                <Button className="w-full">{card.action}</Button>
+              </Link>
+            </Card>
+          ))}
+        </div>
       </div>
     </ProtectedRoute>
   );
